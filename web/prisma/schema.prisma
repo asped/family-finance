@@ -1,0 +1,110 @@
+// Prisma schema for Rodinný Finančný Analyzátor (PoC)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum AccountType {
+  checking
+  investment
+  savings
+}
+
+enum ConnectionProvider {
+  ENABLE_BANKING
+}
+
+enum ConnectionStatus {
+  created
+  active
+  expired
+  error
+}
+
+model Account {
+  id             String       @id @default(cuid())
+  bank_name      String
+  account_number String
+  owner_name     String
+  type           AccountType
+
+  transactions Transaction[]
+  links        AccountLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bank_name])
+  @@index([owner_name])
+  @@unique([bank_name, account_number, owner_name])
+}
+
+model Transaction {
+  // Deterministic ID = hash(...) for deduplication.
+  id String @id
+
+  account_id String
+  account    Account @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  date        DateTime
+  amount      Decimal
+  currency    String
+  counterparty String?
+  description  String?
+  category     String?
+  variable_symbol String?
+
+  is_internal_transfer      Boolean @default(false)
+  internal_transfer_pair_id String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([account_id, date])
+  @@index([currency])
+  @@index([category])
+  @@index([is_internal_transfer])
+  @@index([internal_transfer_pair_id])
+}
+
+model BankConnection {
+  id       String             @id @default(cuid())
+  provider ConnectionProvider @default(ENABLE_BANKING)
+  status   ConnectionStatus   @default(created)
+
+  // Enable Banking "session_id" (per your PoC flow).
+  session_id String @unique
+
+  // Optional metadata for UX/debug.
+  institution_id   String?
+  institution_name String?
+
+  links AccountLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([provider, status])
+}
+
+model AccountLink {
+  id String @id @default(cuid())
+
+  account_id    String
+  connection_id String
+
+  account    Account        @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  connection BankConnection @relation(fields: [connection_id], references: [id], onDelete: Cascade)
+
+  // External account identifier inside the provider (if available).
+  external_account_id String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([account_id, connection_id])
+  @@index([connection_id])
+}
