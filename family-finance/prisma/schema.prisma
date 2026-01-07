@@ -1,0 +1,108 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Typ účtu: CHECKING (Bežný účet), INVESTMENT (Investičný), SAVINGS (Sporiteľňa)
+// SQLite nepodporuje enum, preto používame String
+
+// Bankový účet
+model Account {
+  id            String      @id @default(cuid())
+  bankName      String      // mBank, SLSP, Revolut, Patria, Portu
+  accountNumber String      // Číslo účtu (IBAN alebo interné)
+  ownerName     String      // Meno majiteľa účtu
+  type          String      @default("CHECKING") // CHECKING, INVESTMENT, SAVINGS
+  currency      String      @default("EUR")
+  
+  // Enable Banking integration
+  enableBankingSessionId String?
+  consentExpiresAt       DateTime?
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  transactions  Transaction[]
+  
+  @@unique([bankName, accountNumber])
+}
+
+// Transakcia
+model Transaction {
+  id                    String    @id @default(cuid())
+  accountId             String
+  account               Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  // Základné údaje transakcie
+  date                  DateTime
+  amount                Float     // Záporné = výdavok, Kladné = príjem
+  currency              String    @default("EUR")
+  
+  // Protistrana a popis
+  counterparty          String?   // Meno protistrany
+  counterpartyAccount   String?   // IBAN protistrany
+  description           String?   // Popis transakcie
+  
+  // Slovenské špecifiká
+  variableSymbol        String?
+  specificSymbol        String?
+  constantSymbol        String?
+  
+  // Kategorizácia
+  category              String?   // Groceries, Fuel, Utilities, etc.
+  
+  // Detekcia interných prevodov
+  isInternalTransfer    Boolean   @default(false)
+  internalTransferPairId String?  // ID párovej transakcie
+  
+  // Deduplikácia
+  transactionHash       String    @unique // Hash pre deduplikáciu
+  
+  // Originálne dáta
+  rawData               String?   // JSON s originálnymi dátami z importu
+  importSource          String?   // Zdroj importu (filename alebo "enable_banking")
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  @@index([accountId])
+  @@index([date])
+  @@index([category])
+  @@index([isInternalTransfer])
+}
+
+// Pravidlá pre automatickú kategorizáciu
+model CategoryRule {
+  id          String   @id @default(cuid())
+  keyword     String   // Kľúčové slovo na vyhľadanie
+  category    String   // Cieľová kategória
+  priority    Int      @default(0) // Vyššia priorita = vyhodnotí sa skôr
+  isActive    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([keyword, category])
+}
+
+// Enable Banking sessions a consenty
+model BankConnection {
+  id                  String    @id @default(cuid())
+  bankName            String
+  aspspId             String    // ID banky v Enable Banking
+  sessionId           String?   // Session ID z Enable Banking
+  authorizationUrl    String?   // URL pre autorizáciu
+  consentId           String?
+  consentExpiresAt    DateTime?
+  status              String    @default("pending") // pending, active, expired, revoked
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
