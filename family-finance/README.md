@@ -168,6 +168,42 @@ this.registerParser(new NewBankParser());
 - `isInternalTransfer` - Či je to interný prevod
 - `transactionHash` - Hash pre deduplikáciu
 
+## Deployment na Vercel
+
+### 1. Vytvorte Neon databázu (zadarmo)
+
+1. Choďte na [neon.tech](https://neon.tech) a vytvorte účet
+2. Vytvorte nový projekt
+3. Skopírujte connection string (bude vyzerať ako `postgresql://user:pass@host/db`)
+
+### 2. Nasaďte na Vercel
+
+```bash
+# V root priečinku projektu
+cd family-finance
+vercel
+```
+
+Alebo cez GitHub:
+1. Push kód na GitHub
+2. Importujte projekt na [vercel.com](https://vercel.com)
+3. Nastavte environment variables:
+   - `DATABASE_URL` - Neon connection string (pooled)
+   - `DIRECT_URL` - Neon connection string (direct)
+
+### 3. Inicializujte databázu
+
+Po nasadení spustite:
+```bash
+npx prisma db push
+```
+
+Alebo cez Vercel CLI:
+```bash
+vercel env pull .env.local
+npx prisma db push
+```
+
 ## Licencia
 
 MIT

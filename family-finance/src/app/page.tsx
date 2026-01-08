@@ -1,6 +1,9 @@
 import { Suspense } from "react"
 import { getFinancialSummary } from "@/actions/transactions"
 import { getAccounts } from "@/actions/accounts"
+
+// Force dynamic rendering - no static prerender during build
+export const dynamic = 'force-dynamic'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
 import { 
