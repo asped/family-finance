@@ -89,9 +89,10 @@ export async function POST(request: NextRequest) {
       const errorText = await response.text()
       console.error('Enable Banking API error:', response.status, errorText)
       
-      // Debug: decode JWT header
-      const [headerB64] = jwt.split('.')
+      // Debug: decode JWT header and payload
+      const [headerB64, payloadB64] = jwt.split('.')
       const headerJson = Buffer.from(headerB64, 'base64url').toString()
+      const payloadJson = Buffer.from(payloadB64, 'base64url').toString()
       
       return NextResponse.json(
         { 
@@ -99,6 +100,7 @@ export async function POST(request: NextRequest) {
           details: errorText,
           debug: {
             jwtHeader: headerJson,
+            jwtPayload: payloadJson,
             appIdUsed: appId?.substring(0, 8) + '...'
           }
         },
