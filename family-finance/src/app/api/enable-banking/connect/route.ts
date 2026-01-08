@@ -5,11 +5,13 @@ const ENABLE_BANKING_API = 'https://api.enablebanking.com'
 
 /**
  * Generuje JWT token pre Enable Banking API
+ * kid = Application ID z Enable Banking
  */
 function generateJWT(appId: string, privateKey: string): string {
   const header = {
     alg: 'RS256',
-    typ: 'JWT'
+    typ: 'JWT',
+    kid: appId  // Key ID je Application ID
   }
   
   const now = Math.floor(Date.now() / 1000)
