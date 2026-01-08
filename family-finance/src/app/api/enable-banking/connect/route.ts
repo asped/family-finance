@@ -17,7 +17,7 @@ function generateJWT(appId: string, privateKey: string): string {
   const now = Math.floor(Date.now() / 1000)
   const payload = {
     iss: appId,
-    aud: 'https://api.enablebanking.com',
+    aud: 'api.enablebanking.com',
     iat: now,
     exp: now + 3600, // 1 hodina
   }
