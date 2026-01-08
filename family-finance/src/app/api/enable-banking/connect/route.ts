@@ -43,15 +43,26 @@ export async function POST(request: NextRequest) {
     const privateKey = process.env.ENABLE_BANKING_PRIVATE_KEY?.replace(/\\n/g, '\n')
     const redirectUri = process.env.ENABLE_BANKING_REDIRECT_URI
     
+    console.log('Enable Banking Config:', {
+      appId: appId ? `${appId.substring(0, 8)}...` : 'MISSING',
+      privateKeyLength: privateKey?.length || 0,
+      redirectUri: redirectUri || 'MISSING'
+    })
+    
     if (!appId || !privateKey || !redirectUri) {
       return NextResponse.json(
-        { error: 'Enable Banking nie je nakonfigurované' },
+        { error: 'Enable Banking nie je nakonfigurované', details: { appId: !!appId, privateKey: !!privateKey, redirectUri: !!redirectUri } },
         { status: 500 }
       )
     }
     
     // Generuj JWT
     const jwt = generateJWT(appId, privateKey)
+    
+    // Debug: decode JWT header to verify kid is present
+    const [headerB64] = jwt.split('.')
+    const headerJson = Buffer.from(headerB64, 'base64url').toString()
+    console.log('JWT Header:', headerJson)
     
     // Vytvor session v Enable Banking
     const response = await fetch(`${ENABLE_BANKING_API}/auth`, {
@@ -77,8 +88,20 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text()
       console.error('Enable Banking API error:', response.status, errorText)
+      
+      // Debug: decode JWT header
+      const [headerB64] = jwt.split('.')
+      const headerJson = Buffer.from(headerB64, 'base64url').toString()
+      
       return NextResponse.json(
-        { error: `Enable Banking API chyba: ${response.status}` },
+        { 
+          error: `Enable Banking API chyba: ${response.status}`,
+          details: errorText,
+          debug: {
+            jwtHeader: headerJson,
+            appIdUsed: appId?.substring(0, 8) + '...'
+          }
+        },
         { status: response.status }
       )
     }
