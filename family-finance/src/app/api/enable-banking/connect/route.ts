@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         access: {
-          valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 90 dní
+          valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 dní, ISO 8601 s timezone
         },
         aspsp: {
           name: aspspId,
