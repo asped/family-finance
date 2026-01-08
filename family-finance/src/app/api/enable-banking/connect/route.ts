@@ -64,6 +64,22 @@ export async function POST(request: NextRequest) {
     const headerJson = Buffer.from(headerB64, 'base64url').toString()
     console.log('JWT Header:', headerJson)
     
+    // Vytvor request body
+    const requestBody = {
+      access: {
+        valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 dní, ISO 8601 s timezone
+      },
+      aspsp: {
+        name: aspspId,
+        country: 'SK'
+      },
+      state: `bank_${aspspId}_${Date.now()}`,
+      redirect_url: redirectUri,
+      psu_type: 'personal'
+    }
+    
+    console.log('Request body:', JSON.stringify(requestBody))
+    
     // Vytvor session v Enable Banking
     const response = await fetch(`${ENABLE_BANKING_API}/auth`, {
       method: 'POST',
@@ -71,18 +87,7 @@ export async function POST(request: NextRequest) {
         'Authorization': `Bearer ${jwt}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        access: {
-          valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 dní, ISO 8601 s timezone
-        },
-        aspsp: {
-          name: aspspId,
-          country: 'SK'
-        },
-        state: `bank_${aspspId}_${Date.now()}`,
-        redirect_url: redirectUri,
-        psu_type: 'personal'
-      })
+      body: JSON.stringify(requestBody)
     })
     
     if (!response.ok) {
@@ -101,7 +106,8 @@ export async function POST(request: NextRequest) {
           debug: {
             jwtHeader: headerJson,
             jwtPayload: payloadJson,
-            appIdUsed: appId?.substring(0, 8) + '...'
+            appIdUsed: appId?.substring(0, 8) + '...',
+            requestBody: requestBody
           }
         },
         { status: response.status }
