@@ -65,20 +65,34 @@ export default function EnableBankingPage() {
     setError(null)
     
     try {
-      // Tu by sa volalo Enable Banking API na získanie autorizačnej URL
-      // const session = await initiateAuthorization(bank.aspspId)
-      // window.location.href = session.authorizationUrl
+      const response = await fetch('/api/enable-banking/connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          aspspId: bank.aspspId,
+          bankName: bank.name
+        })
+      })
       
-      // Pre demo zobrazíme info modal
-      alert(`Pre prepojenie s ${bank.name} je potrebné:\n\n1. Registrovať sa na enablebanking.com\n2. Nastaviť ENABLE_BANKING_APP_ID a ENABLE_BANKING_PRIVATE_KEY v .env\n3. Implementovať callback endpoint\n\nPo nastavení budete presmerovaný do banky na autorizáciu.`)
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Nepodarilo sa pripojiť')
+      }
+      
+      // Presmeruj na autorizačnú stránku banky
+      if (data.authorizationUrl) {
+        window.location.href = data.authorizationUrl
+      } else {
+        throw new Error('Chýba autorizačná URL')
+      }
     } catch (err) {
-      setError(`Nepodarilo sa prepojiť s ${bank.name}`)
-    } finally {
+      setError(err instanceof Error ? err.message : `Nepodarilo sa prepojiť s ${bank.name}`)
       setConnecting(null)
     }
   }
-  
-  const isConfigured = process.env.NEXT_PUBLIC_ENABLE_BANKING_CONFIGURED === 'true'
   
   return (
     <div className="space-y-6">
@@ -108,24 +122,6 @@ export default function EnableBankingPage() {
           </a>
         </AlertDescription>
       </Alert>
-      
-      {/* Configuration Status */}
-      {!isConfigured && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Enable Banking nie je nakonfigurované</AlertTitle>
-          <AlertDescription>
-            <p className="mb-2">
-              Pre použitie Enable Banking je potrebné nastaviť tieto premenné v .env súbore:
-            </p>
-            <ul className="list-disc list-inside text-sm space-y-1">
-              <li>ENABLE_BANKING_APP_ID - ID aplikácie z Enable Banking</li>
-              <li>ENABLE_BANKING_PRIVATE_KEY - RSA privátny kľúč</li>
-              <li>ENABLE_BANKING_REDIRECT_URI - Callback URL</li>
-            </ul>
-          </AlertDescription>
-        </Alert>
-      )}
       
       {/* Active Connections */}
       {connections.length > 0 && (
