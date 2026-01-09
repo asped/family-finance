@@ -91,14 +91,19 @@ export async function processImportFile(
     console.log(debugLines.join('\n'))
     
     if (!parseResult.success || parseResult.transactions.length === 0) {
+      // Pridaj debug info priamo do errors
+      const allErrors = [
+        ...(parseResult.errors.length > 0 ? parseResult.errors : ['V súbore neboli nájdené žiadne transakcie']),
+        '--- DEBUG ---',
+        ...debugLines
+      ]
+      
       return {
         success: false,
         bankName: parseResult.bankName,
         imported: 0,
         duplicates: 0,
-        errors: parseResult.errors.length > 0 
-          ? parseResult.errors 
-          : ['V súbore neboli nájdené žiadne transakcie'],
+        errors: allErrors,
         debugInfo: debugLines.join(' | ')
       }
     }
@@ -140,7 +145,7 @@ export async function processImportFile(
       bankName: detectedBank,
       imported: 0,
       duplicates: 0,
-      errors: [`Chyba pri spracovaní: ${errorMessage}`],
+      errors: [`Chyba pri spracovaní: ${errorMessage}`, '--- DEBUG ---', ...debugLines],
       debugInfo: debugLines.join(' | ')
     }
   }
