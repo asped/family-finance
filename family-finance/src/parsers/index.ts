@@ -37,12 +37,21 @@ export class ParserManager {
     const textContent = this.getTextContent(content);
     const headers = this.extractHeaders(content, filename);
     
+    console.log('=== BANK DETECTION DEBUG ===');
+    console.log('Filename:', filename);
+    console.log('Extracted headers:', headers);
+    console.log('Content preview:', textContent.substring(0, 200));
+    
     for (const parser of this.parsers) {
-      if (parser.canParse(headers, textContent)) {
+      const canParse = parser.canParse(headers, textContent);
+      console.log(`  ${parser.name}: canParse = ${canParse}`);
+      if (canParse) {
+        console.log(`Detected bank: ${parser.name}`);
         return parser.name;
       }
     }
     
+    console.log('No bank detected');
     return 'Unknown';
   }
   

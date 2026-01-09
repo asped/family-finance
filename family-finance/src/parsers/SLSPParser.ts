@@ -117,10 +117,24 @@ export class SLSPParser extends BaseParser {
    * "Vlastný názov účtu";"Vlastný IBAN";"Dátum splatnosti";"Suma";"Mena";"Partner";...
    */
   private parseCsv(text: string, filename: string): ParsedTransaction[] {
+    console.log('=== SLSP CSV PARSER DEBUG ===');
+    console.log('Content length:', text.length);
+    console.log('First 300 chars:', text.substring(0, 300));
+    
     const transactions: ParsedTransaction[] = [];
     const lines = this.parseCSV(text, ';');
     
-    if (lines.length < 2) return transactions;
+    console.log('Total lines parsed:', lines.length);
+    
+    if (lines.length < 2) {
+      console.log('SLSP: Not enough lines');
+      return transactions;
+    }
+    
+    // Debug: ukáž prvých 5 riadkov
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      console.log(`Line ${i}:`, lines[i].slice(0, 5).join(' | '));
+    }
     
     // Prvý riadok sú hlavičky
     const headers = lines[0].map(h => h.toLowerCase().replace(/"/g, '').trim());
@@ -142,18 +156,30 @@ export class SLSPParser extends BaseParser {
     
     console.log('SLSP column indices:', { dateIdx, amountIdx, currencyIdx, partnerIdx, partnerIbanIdx });
     
+    console.log('Processing SLSP rows from 1 to', lines.length - 1);
+    
     // Spracuj transakcie (od riadku 1, pretože 0 sú hlavičky)
     for (let i = 1; i < lines.length; i++) {
       const row = lines[i];
       
+      console.log(`Row ${i}:`, row.slice(0, 5).join(' | '));
+      
       // Preskočiť prázdne riadky
-      if (row.length < 4) continue;
+      if (row.length < 4) {
+        console.log(`  Skipping: too few columns (${row.length})`);
+        continue;
+      }
       
       // Dátum - formát DD.MM.YYYY
       const dateStr = row[dateIdx]?.replace(/"/g, '').trim() || '';
       const date = this.parseDate(dateStr);
       
-      if (!date) continue;
+      console.log(`  Date string: "${dateStr}", parsed:`, date);
+      
+      if (!date) {
+        console.log('  Skipping: invalid date');
+        continue;
+      }
       
       // Suma - formát "-480,00" alebo "-2 500,00"
       const amountStr = row[amountIdx]?.replace(/"/g, '').trim() || '0';
@@ -198,9 +224,11 @@ export class SLSPParser extends BaseParser {
         },
       };
       
+      console.log('  Created transaction:', { date: transaction.date, amount: transaction.amount, partner });
       transactions.push(this.applyCategorization(transaction));
     }
     
+    console.log('Total SLSP transactions parsed:', transactions.length);
     return transactions;
   }
   

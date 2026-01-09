@@ -13,6 +13,13 @@ export interface ImportFileResult {
   imported: number
   duplicates: number
   errors: string[]
+  debug?: {
+    fileSize: number
+    filename: string
+    detectedBank: BankName
+    contentPreview: string
+    headersFound: string[]
+  }
 }
 
 export async function processImportFile(
@@ -36,10 +43,56 @@ export async function processImportFile(
   const content = await file.arrayBuffer()
   const filename = file.name
   
+  // Debug: konvertuj na text pre náhľad
+  let textPreview = ''
+  try {
+    // Skús UTF-8
+    let text = new TextDecoder('utf-8').decode(content)
+    if (text.includes('\uFFFD')) {
+      // Fallback na Windows-1250
+      text = new TextDecoder('windows-1250').decode(content)
+    }
+    textPreview = text.substring(0, 500)
+    console.log('=== IMPORT DEBUG ===')
+    console.log('Filename:', filename)
+    console.log('File size:', content.byteLength)
+    console.log('Content preview:', textPreview)
+  } catch (e) {
+    console.error('Error decoding content:', e)
+  }
+  
   // Parsuj súbor
   const parseResult: ImportResult = await parserManager.parseFile(content, filename, forceBankName)
   
+  console.log('Parse result:', {
+    success: parseResult.success,
+    bankName: parseResult.bankName,
+    transactionCount: parseResult.transactions.length,
+    errors: parseResult.errors,
+    accountNumber: parseResult.accountNumber
+  })
+  
   if (!parseResult.success || parseResult.transactions.length === 0) {
+    // Extrahuj hlavičky pre debug
+    let headersFound: string[] = []
+    try {
+      let text = new TextDecoder('utf-8').decode(content)
+      if (text.includes('\uFFFD')) {
+        text = new TextDecoder('windows-1250').decode(content)
+      }
+      const lines = text.split(/\r?\n/).filter(l => l.trim())
+      // Nájdi prvý riadok s viacerými stĺpcami
+      for (let i = 0; i < Math.min(20, lines.length); i++) {
+        const parts = lines[i].split(/[;,]/)
+        if (parts.length >= 3) {
+          headersFound = parts.map(p => p.replace(/"/g, '').trim()).slice(0, 10)
+          break
+        }
+      }
+    } catch (e) {
+      console.error('Error extracting headers:', e)
+    }
+    
     return {
       success: false,
       bankName: parseResult.bankName,
@@ -47,7 +100,14 @@ export async function processImportFile(
       duplicates: 0,
       errors: parseResult.errors.length > 0 
         ? parseResult.errors 
-        : ['V súbore neboli nájdené žiadne transakcie']
+        : ['V súbore neboli nájdené žiadne transakcie'],
+      debug: {
+        fileSize: content.byteLength,
+        filename,
+        detectedBank: parseResult.bankName,
+        contentPreview: textPreview,
+        headersFound
+      }
     }
   }
   

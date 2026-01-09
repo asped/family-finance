@@ -19,6 +19,13 @@ interface ImportResult {
   imported: number
   duplicates: number
   errors: string[]
+  debug?: {
+    fileSize: number
+    filename: string
+    detectedBank: BankName
+    contentPreview: string
+    headersFound: string[]
+  }
 }
 
 const SUPPORTED_FORMATS = [
@@ -237,6 +244,20 @@ export default function ImportPage() {
                               <li key={i}>{error}</li>
                             ))}
                           </ul>
+                        </div>
+                      )}
+                      {result.debug && (
+                        <div className="mt-4 p-3 bg-muted rounded text-xs font-mono">
+                          <p className="font-bold mb-2">Debug info:</p>
+                          <p>Súbor: {result.debug.filename} ({result.debug.fileSize} bytes)</p>
+                          <p>Detekovaná banka: {result.debug.detectedBank}</p>
+                          <p>Nájdené hlavičky: {result.debug.headersFound.join(' | ')}</p>
+                          <details className="mt-2">
+                            <summary className="cursor-pointer">Náhľad obsahu</summary>
+                            <pre className="mt-1 whitespace-pre-wrap break-all max-h-40 overflow-auto">
+                              {result.debug.contentPreview}
+                            </pre>
+                          </details>
                         </div>
                       )}
                     </div>

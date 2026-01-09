@@ -85,37 +85,71 @@ export class MBankParser extends BaseParser {
       text = content;
     }
     
+    console.log('=== MBANK PARSER DEBUG ===');
+    console.log('Content length:', text.length);
+    console.log('First 300 chars:', text.substring(0, 300));
+    
     const transactions: ParsedTransaction[] = [];
     
     // mBank používa bodkočiarku ako delimiter
     const lines = this.parseCSV(text, ';');
     
+    console.log('Total lines parsed:', lines.length);
+    
     if (lines.length < 2) {
+      console.log('mBank: Not enough lines');
       return transactions;
+    }
+    
+    // Debug: ukáž prvých 20 riadkov
+    for (let i = 0; i < Math.min(25, lines.length); i++) {
+      const lineStr = lines[i].join(' | ');
+      console.log(`Line ${i}: ${lineStr.substring(0, 100)}`);
     }
     
     // Nájdi index hlavičky s dátami
     let headerIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].map(h => h.toLowerCase().replace('#', '').trim());
+      const line = lines[i].map(h => h.toLowerCase().replace(/#/g, '').trim());
       // Hľadaj riadok s "dátum operácie" alebo "dátum uskutočnenia"
-      if (line.some(h => h.includes('dátum operácie') || h.includes('datum operacie') || 
-                        h.includes('dátum uskutočnenia') || h.includes('datum uskutočnenia'))) {
+      const hasDateHeader = line.some(h => 
+        h.includes('dátum operácie') || 
+        h.includes('datum operacie') || 
+        h.includes('dátum uskutočnenia') || 
+        h.includes('datum uskutočnenia')
+      );
+      
+      if (hasDateHeader) {
+        console.log(`Found header at line ${i}:`, line);
         headerIndex = i;
         break;
       }
     }
     
     if (headerIndex === -1) {
-      console.log('mBank: Header not found');
+      console.log('mBank: Header not found after checking all lines');
+      // Fallback: hľadaj riadok ktorý začína dátumom YYYY-MM-DD
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i][0] && /^\d{4}-\d{2}-\d{2}$/.test(lines[i][0].trim())) {
+          console.log(`Found data row at line ${i}, assuming headers at ${i-1}`);
+          headerIndex = i - 1;
+          break;
+        }
+      }
+    }
+    
+    if (headerIndex === -1) {
+      console.log('mBank: Still no header found');
       return transactions;
     }
     
-    const headers = lines[headerIndex].map(h => h.toLowerCase().replace('#', '').trim());
+    const headers = lines[headerIndex].map(h => h.toLowerCase().replace(/#/g, '').trim());
     console.log('mBank headers found:', headers);
     
     // Detekuj formát (nový vs starý)
-    const isNewFormat = headers.some(h => h.includes('dátum operácie') || h.includes('datum operacie'));
+    const isNewFormat = headers.some(h => h.includes('dátum operácie') || h.includes('datum operacie') || h.includes('dátum'));
+    
+    console.log('Using format:', isNewFormat ? 'new' : 'old');
     
     if (isNewFormat) {
       return this.parseNewFormat(lines, headers, headerIndex, filename);
@@ -144,24 +178,43 @@ export class MBankParser extends BaseParser {
     const amountIdx = headers.findIndex(h => h.includes('suma'));
     
     console.log('mBank column indices:', { dateIdx, descIdx, accountIdx, categoryIdx, amountIdx });
+    console.log('Processing rows from', headerIndex + 1, 'to', lines.length - 1);
     
     // Spracuj transakcie
     for (let i = headerIndex + 1; i < lines.length; i++) {
       const row = lines[i];
       
+      console.log(`Row ${i}:`, row.slice(0, 5).join(' | '));
+      
       // Preskočiť prázdne riadky a pätičky
-      if (row.length < 3) continue;
-      if (row[0]?.toLowerCase().includes('mbank')) continue;
-      if (row[0]?.toLowerCase().includes('bližšie informácie')) continue;
+      if (row.length < 3) {
+        console.log(`  Skipping: too few columns (${row.length})`);
+        continue;
+      }
+      if (row[0]?.toLowerCase().includes('mbank')) {
+        console.log('  Skipping: mbank footer');
+        continue;
+      }
+      if (row[0]?.toLowerCase().includes('bližšie informácie')) {
+        console.log('  Skipping: info footer');
+        continue;
+      }
       
       const dateStr = row[dateIdx]?.replace(/"/g, '').trim() || '';
       const date = this.parseMBankDate(dateStr);
       
-      if (!date) continue;
+      console.log(`  Date string: "${dateStr}", parsed:`, date);
+      
+      if (!date) {
+        console.log('  Skipping: invalid date');
+        continue;
+      }
       
       // Parsuj sumu - formát: "-95,00 EUR" alebo "771,61 EUR"
       const amountStr = row[amountIdx]?.replace(/"/g, '').trim() || '0';
       const amount = this.parseMBankAmount(amountStr);
+      
+      console.log(`  Amount string: "${amountStr}", parsed: ${amount}`);
       
       // Extrahuj menu
       const currencyMatch = amountStr.match(/[A-Z]{3}/);
@@ -192,9 +245,11 @@ export class MBankParser extends BaseParser {
         },
       };
       
+      console.log('  Created transaction:', { date: transaction.date, amount: transaction.amount });
       transactions.push(this.applyCategorization(transaction));
     }
     
+    console.log('Total mBank transactions parsed:', transactions.length);
     return transactions;
   }
   
