@@ -41,7 +41,7 @@ export class MBankParser extends BaseParser {
   ];
   
   canParse(headers: string[], content: string): boolean {
-    const headerLower = headers.map(h => h.toLowerCase().replace('#', '').trim());
+    const headerLower = headers.map(h => h.toLowerCase().replace(/#/g, '').trim());
     
     // Kontrola nového formátu
     const newFormatMatch = this.mBankHeaders.filter(h => 
@@ -71,15 +71,17 @@ export class MBankParser extends BaseParser {
   async parse(content: string | ArrayBuffer, filename: string): Promise<ParsedTransaction[]> {
     let text: string;
     
-    // Skús dekódovať ako Windows-1250, potom UTF-8
+    // Skús dekódovať - najprv UTF-8, potom Windows-1250
     if (content instanceof ArrayBuffer) {
-      try {
-        // Skús Windows-1250 (Central European)
-        const decoder = new TextDecoder('windows-1250');
-        text = decoder.decode(content);
-      } catch {
-        // Fallback na UTF-8
-        text = new TextDecoder('utf-8').decode(content);
+      // Skús UTF-8 najprv
+      const utf8Text = new TextDecoder('utf-8').decode(content);
+      
+      // Ak obsahuje replacement character (neplatný UTF-8), skús Windows-1250
+      if (utf8Text.includes('\uFFFD')) {
+        console.log('UTF-8 failed, trying Windows-1250');
+        text = new TextDecoder('windows-1250').decode(content);
+      } else {
+        text = utf8Text;
       }
     } else {
       text = content;
