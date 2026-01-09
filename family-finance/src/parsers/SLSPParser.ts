@@ -77,21 +77,16 @@ export class SLSPParser extends BaseParser {
   }
   
   async parse(content: string | ArrayBuffer, filename: string): Promise<ParsedTransaction[]> {
-    // Konvertuj na text
+    // Konvertuj na text s detekciou kódovania
     let text: string;
     if (content instanceof ArrayBuffer) {
-      // Skús UTF-8, potom Windows-1250
-      try {
-        text = new TextDecoder('utf-8').decode(content);
-        if (text.includes('\uFFFD')) {
-          text = new TextDecoder('windows-1250').decode(content);
-        }
-      } catch {
-        text = new TextDecoder('windows-1250').decode(content);
-      }
+      text = this.decodeContent(content);
     } else {
       text = content;
     }
+    
+    console.log('SLSP: Decoded text length:', text.length);
+    console.log('SLSP: First 100 chars:', text.substring(0, 100));
     
     // Detekcia typu súboru
     if (filename.endsWith('.xml') || text.includes('<?xml')) {
@@ -434,14 +429,47 @@ export class SLSPParser extends BaseParser {
     return match ? match[1] : null;
   }
   
+  /**
+   * Dekóduje obsah súboru s automatickou detekciou kódovania
+   * Podporuje: UTF-16 LE, UTF-16 BE, UTF-8, Windows-1250
+   */
+  private decodeContent(content: ArrayBuffer): string {
+    const bytes = new Uint8Array(content);
+    
+    // UTF-16 LE BOM: FF FE
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+      console.log('SLSP: Detected UTF-16 LE encoding');
+      return new TextDecoder('utf-16le').decode(content);
+    }
+    
+    // UTF-16 BE BOM: FE FF
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+      console.log('SLSP: Detected UTF-16 BE encoding');
+      return new TextDecoder('utf-16be').decode(content);
+    }
+    
+    // UTF-8 BOM: EF BB BF
+    if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      console.log('SLSP: Detected UTF-8 with BOM');
+      return new TextDecoder('utf-8').decode(content);
+    }
+    
+    // Skús UTF-8
+    const utf8Text = new TextDecoder('utf-8').decode(content);
+    if (!utf8Text.includes('\uFFFD')) {
+      console.log('SLSP: Using UTF-8 encoding');
+      return utf8Text;
+    }
+    
+    // Fallback na Windows-1250
+    console.log('SLSP: Fallback to Windows-1250');
+    return new TextDecoder('windows-1250').decode(content);
+  }
+  
   detectAccountNumber(content: string | ArrayBuffer): string | null {
     let text: string;
     if (content instanceof ArrayBuffer) {
-      try {
-        text = new TextDecoder('utf-8').decode(content);
-      } catch {
-        text = new TextDecoder('windows-1250').decode(content);
-      }
+      text = this.decodeContent(content);
     } else {
       text = content;
     }

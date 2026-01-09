@@ -178,31 +178,38 @@ export class ParserManager {
   
   /**
    * Konvertuje ArrayBuffer na string
-   * Skúša najprv UTF-8, potom Windows-1250 (Central European)
+   * Podporuje: UTF-16 LE/BE, UTF-8, Windows-1250
    */
   private getTextContent(content: string | ArrayBuffer): string {
     if (typeof content === 'string') {
       return content;
     }
     
-    // Skús najprv UTF-8
-    try {
-      const utf8Text = new TextDecoder('utf-8').decode(content);
-      // Ak obsahuje platné UTF-8 znaky (nie replacement chars), vráť
-      if (!utf8Text.includes('\uFFFD')) {
-        return utf8Text;
-      }
-    } catch {
-      // Pokračuj na Windows-1250
+    const bytes = new Uint8Array(content);
+    
+    // UTF-16 LE BOM: FF FE (SLSP používa toto!)
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+      return new TextDecoder('utf-16le').decode(content);
     }
     
-    // Skús Windows-1250 (mBank, niektoré slovenské banky)
-    try {
-      return new TextDecoder('windows-1250').decode(content);
-    } catch {
-      // Fallback na UTF-8 s chybami
-      return new TextDecoder('utf-8', { fatal: false }).decode(content);
+    // UTF-16 BE BOM: FE FF
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+      return new TextDecoder('utf-16be').decode(content);
     }
+    
+    // UTF-8 BOM: EF BB BF
+    if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      return new TextDecoder('utf-8').decode(content);
+    }
+    
+    // Skús UTF-8
+    const utf8Text = new TextDecoder('utf-8').decode(content);
+    if (!utf8Text.includes('\uFFFD')) {
+      return utf8Text;
+    }
+    
+    // Fallback na Windows-1250 (mBank)
+    return new TextDecoder('windows-1250').decode(content);
   }
   
   /**

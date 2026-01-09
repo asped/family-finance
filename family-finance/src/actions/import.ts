@@ -48,15 +48,32 @@ export async function processImportFile(
     // Debug: konvertuj na text pre náhľad
     let textContent = ''
     try {
-      // Skús UTF-8
-      let text = new TextDecoder('utf-8').decode(content)
-      if (text.includes('\uFFFD')) {
-        // Fallback na Windows-1250
-        text = new TextDecoder('windows-1250').decode(content)
-        debugLines.push('Kódovanie: Windows-1250')
-      } else {
-        debugLines.push('Kódovanie: UTF-8')
+      // Detekuj BOM a kódovanie
+      const bytes = new Uint8Array(content)
+      let encoding = 'utf-8'
+      
+      // UTF-16 LE BOM: FF FE
+      if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+        encoding = 'utf-16le'
       }
+      // UTF-16 BE BOM: FE FF
+      else if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+        encoding = 'utf-16be'
+      }
+      // UTF-8 BOM: EF BB BF
+      else if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+        encoding = 'utf-8'
+      }
+      
+      let text = new TextDecoder(encoding).decode(content)
+      
+      // Ak UTF-8 má replacement chars, skús Windows-1250
+      if (encoding === 'utf-8' && text.includes('\uFFFD')) {
+        text = new TextDecoder('windows-1250').decode(content)
+        encoding = 'windows-1250'
+      }
+      
+      debugLines.push(`Kódovanie: ${encoding}`)
       textContent = text
       
       // Extrahuj prvých pár riadkov pre debug
