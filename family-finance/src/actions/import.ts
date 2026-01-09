@@ -19,6 +19,7 @@ export interface ImportFileResult {
     detectedBank: BankName
     contentPreview: string
     headersFound: string[]
+    error?: string
   }
 }
 
@@ -27,113 +28,136 @@ export async function processImportFile(
   forceBankName?: BankName,
   ownerName?: string
 ): Promise<ImportFileResult> {
-  const file = formData.get('file') as File
-  
-  if (!file) {
-    return {
-      success: false,
-      bankName: 'Unknown',
-      imported: 0,
-      duplicates: 0,
-      errors: ['Súbor nebol poskytnutý']
-    }
-  }
-  
-  // Načítaj obsah súboru
-  const content = await file.arrayBuffer()
-  const filename = file.name
-  
-  // Debug: konvertuj na text pre náhľad
   let textPreview = ''
+  let filename = 'unknown'
+  let fileSize = 0
+  let headersFound: string[] = []
+  let detectedBank: BankName = 'Unknown'
+  
   try {
-    // Skús UTF-8
-    let text = new TextDecoder('utf-8').decode(content)
-    if (text.includes('\uFFFD')) {
-      // Fallback na Windows-1250
-      text = new TextDecoder('windows-1250').decode(content)
+    const file = formData.get('file') as File
+    
+    if (!file) {
+      return {
+        success: false,
+        bankName: 'Unknown',
+        imported: 0,
+        duplicates: 0,
+        errors: ['Súbor nebol poskytnutý']
+      }
     }
-    textPreview = text.substring(0, 500)
-    console.log('=== IMPORT DEBUG ===')
-    console.log('Filename:', filename)
-    console.log('File size:', content.byteLength)
-    console.log('Content preview:', textPreview)
-  } catch (e) {
-    console.error('Error decoding content:', e)
-  }
-  
-  // Parsuj súbor
-  const parseResult: ImportResult = await parserManager.parseFile(content, filename, forceBankName)
-  
-  console.log('Parse result:', {
-    success: parseResult.success,
-    bankName: parseResult.bankName,
-    transactionCount: parseResult.transactions.length,
-    errors: parseResult.errors,
-    accountNumber: parseResult.accountNumber
-  })
-  
-  if (!parseResult.success || parseResult.transactions.length === 0) {
-    // Extrahuj hlavičky pre debug
-    let headersFound: string[] = []
+    
+    // Načítaj obsah súboru
+    const content = await file.arrayBuffer()
+    filename = file.name
+    fileSize = content.byteLength
+    
+    // Debug: konvertuj na text pre náhľad
     try {
+      // Skús UTF-8
       let text = new TextDecoder('utf-8').decode(content)
       if (text.includes('\uFFFD')) {
+        // Fallback na Windows-1250
         text = new TextDecoder('windows-1250').decode(content)
       }
+      textPreview = text.substring(0, 500)
+      
+      // Extrahuj hlavičky pre debug
       const lines = text.split(/\r?\n/).filter(l => l.trim())
-      // Nájdi prvý riadok s viacerými stĺpcami
-      for (let i = 0; i < Math.min(20, lines.length); i++) {
+      for (let i = 0; i < Math.min(30, lines.length); i++) {
         const parts = lines[i].split(/[;,]/)
         if (parts.length >= 3) {
           headersFound = parts.map(p => p.replace(/"/g, '').trim()).slice(0, 10)
           break
         }
       }
+      
+      console.log('=== IMPORT DEBUG ===')
+      console.log('Filename:', filename)
+      console.log('File size:', fileSize)
+      console.log('Headers found:', headersFound)
+      console.log('Content preview:', textPreview.substring(0, 200))
     } catch (e) {
-      console.error('Error extracting headers:', e)
+      console.error('Error decoding content:', e)
     }
+    
+    // Parsuj súbor
+    console.log('Calling parserManager.parseFile...')
+    const parseResult: ImportResult = await parserManager.parseFile(content, filename, forceBankName)
+    detectedBank = parseResult.bankName
+    
+    console.log('Parse result:', {
+      success: parseResult.success,
+      bankName: parseResult.bankName,
+      transactionCount: parseResult.transactions.length,
+      errors: parseResult.errors,
+      accountNumber: parseResult.accountNumber
+    })
+    
+    if (!parseResult.success || parseResult.transactions.length === 0) {
+      return {
+        success: false,
+        bankName: parseResult.bankName,
+        imported: 0,
+        duplicates: 0,
+        errors: parseResult.errors.length > 0 
+          ? parseResult.errors 
+          : ['V súbore neboli nájdené žiadne transakcie'],
+        debug: {
+          fileSize,
+          filename,
+          detectedBank: parseResult.bankName,
+          contentPreview: textPreview,
+          headersFound
+        }
+      }
+    }
+    
+    // Nájdi alebo vytvor účet
+    const accountNumber = parseResult.accountNumber || `${parseResult.bankName}-${Date.now()}`
+    const account = await findOrCreateAccount(
+      parseResult.bankName,
+      accountNumber,
+      ownerName || 'Neznámy'
+    )
+    
+    // Importuj transakcie
+    const importResult = await importTransactions(
+      account.id,
+      parseResult.transactions,
+      filename
+    )
+    
+    return {
+      success: importResult.imported > 0,
+      bankName: parseResult.bankName,
+      accountId: account.id,
+      accountNumber: account.accountNumber,
+      imported: importResult.imported,
+      duplicates: importResult.duplicates,
+      errors: [...parseResult.errors, ...importResult.errors]
+    }
+    
+  } catch (error) {
+    // Zachyť všetky chyby a vráť debug info
+    const errorMessage = error instanceof Error ? error.message : 'Neznáma chyba'
+    console.error('Import error:', error)
     
     return {
       success: false,
-      bankName: parseResult.bankName,
+      bankName: detectedBank,
       imported: 0,
       duplicates: 0,
-      errors: parseResult.errors.length > 0 
-        ? parseResult.errors 
-        : ['V súbore neboli nájdené žiadne transakcie'],
+      errors: [`Chyba pri spracovaní: ${errorMessage}`],
       debug: {
-        fileSize: content.byteLength,
+        fileSize,
         filename,
-        detectedBank: parseResult.bankName,
+        detectedBank,
         contentPreview: textPreview,
-        headersFound
+        headersFound,
+        error: errorMessage
       }
     }
-  }
-  
-  // Nájdi alebo vytvor účet
-  const accountNumber = parseResult.accountNumber || `${parseResult.bankName}-${Date.now()}`
-  const account = await findOrCreateAccount(
-    parseResult.bankName,
-    accountNumber,
-    ownerName || 'Neznámy'
-  )
-  
-  // Importuj transakcie
-  const importResult = await importTransactions(
-    account.id,
-    parseResult.transactions,
-    filename
-  )
-  
-  return {
-    success: importResult.imported > 0,
-    bankName: parseResult.bankName,
-    accountId: account.id,
-    accountNumber: account.accountNumber,
-    imported: importResult.imported,
-    duplicates: importResult.duplicates,
-    errors: [...parseResult.errors, ...importResult.errors]
   }
 }
 

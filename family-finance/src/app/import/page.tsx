@@ -25,6 +25,7 @@ interface ImportResult {
     detectedBank: BankName
     contentPreview: string
     headersFound: string[]
+    error?: string
   }
 }
 
@@ -251,11 +252,14 @@ export default function ImportPage() {
                           <p className="font-bold mb-2">Debug info:</p>
                           <p>Súbor: {result.debug.filename} ({result.debug.fileSize} bytes)</p>
                           <p>Detekovaná banka: {result.debug.detectedBank}</p>
-                          <p>Nájdené hlavičky: {result.debug.headersFound.join(' | ')}</p>
+                          <p>Nájdené hlavičky: {result.debug.headersFound?.join(' | ') || 'žiadne'}</p>
+                          {result.debug.error && (
+                            <p className="text-red-500">Exception: {result.debug.error}</p>
+                          )}
                           <details className="mt-2">
                             <summary className="cursor-pointer">Náhľad obsahu</summary>
                             <pre className="mt-1 whitespace-pre-wrap break-all max-h-40 overflow-auto">
-                              {result.debug.contentPreview}
+                              {result.debug.contentPreview || 'prázdny'}
                             </pre>
                           </details>
                         </div>
