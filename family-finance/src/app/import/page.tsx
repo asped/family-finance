@@ -19,14 +19,7 @@ interface ImportResult {
   imported: number
   duplicates: number
   errors: string[]
-  debug?: {
-    fileSize: number
-    filename: string
-    detectedBank: BankName
-    contentPreview: string
-    headersFound: string[]
-    error?: string
-  }
+  debugInfo?: string
 }
 
 const SUPPORTED_FORMATS = [
@@ -247,21 +240,12 @@ export default function ImportPage() {
                           </ul>
                         </div>
                       )}
-                      {result.debug && (
-                        <div className="mt-4 p-3 bg-muted rounded text-xs font-mono">
+                      {result.debugInfo && (
+                        <div className="mt-4 p-3 bg-muted rounded text-xs font-mono whitespace-pre-wrap break-all">
                           <p className="font-bold mb-2">Debug info:</p>
-                          <p>Súbor: {result.debug.filename} ({result.debug.fileSize} bytes)</p>
-                          <p>Detekovaná banka: {result.debug.detectedBank}</p>
-                          <p>Nájdené hlavičky: {result.debug.headersFound?.join(' | ') || 'žiadne'}</p>
-                          {result.debug.error && (
-                            <p className="text-red-500">Exception: {result.debug.error}</p>
-                          )}
-                          <details className="mt-2">
-                            <summary className="cursor-pointer">Náhľad obsahu</summary>
-                            <pre className="mt-1 whitespace-pre-wrap break-all max-h-40 overflow-auto">
-                              {result.debug.contentPreview || 'prázdny'}
-                            </pre>
-                          </details>
+                          {result.debugInfo.split(' | ').map((line, i) => (
+                            <p key={i}>{line}</p>
+                          ))}
                         </div>
                       )}
                     </div>

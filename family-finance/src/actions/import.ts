@@ -13,14 +13,7 @@ export interface ImportFileResult {
   imported: number
   duplicates: number
   errors: string[]
-  debug?: {
-    fileSize: number
-    filename: string
-    detectedBank: BankName
-    contentPreview: string
-    headersFound: string[]
-    error?: string
-  }
+  debugInfo?: string  // Jednoduchý string pre debug
 }
 
 export async function processImportFile(
@@ -28,10 +21,7 @@ export async function processImportFile(
   forceBankName?: BankName,
   ownerName?: string
 ): Promise<ImportFileResult> {
-  let textPreview = ''
-  let filename = 'unknown'
-  let fileSize = 0
-  let headersFound: string[] = []
+  const debugLines: string[] = []
   let detectedBank: BankName = 'Unknown'
   
   try {
@@ -43,56 +33,62 @@ export async function processImportFile(
         bankName: 'Unknown',
         imported: 0,
         duplicates: 0,
-        errors: ['Súbor nebol poskytnutý']
+        errors: ['Súbor nebol poskytnutý'],
+        debugInfo: 'No file provided'
       }
     }
     
     // Načítaj obsah súboru
     const content = await file.arrayBuffer()
-    filename = file.name
-    fileSize = content.byteLength
+    const filename = file.name
+    const fileSize = content.byteLength
+    
+    debugLines.push(`Súbor: ${filename} (${fileSize} bytes)`)
     
     // Debug: konvertuj na text pre náhľad
+    let textContent = ''
     try {
       // Skús UTF-8
       let text = new TextDecoder('utf-8').decode(content)
       if (text.includes('\uFFFD')) {
         // Fallback na Windows-1250
         text = new TextDecoder('windows-1250').decode(content)
+        debugLines.push('Kódovanie: Windows-1250')
+      } else {
+        debugLines.push('Kódovanie: UTF-8')
       }
-      textPreview = text.substring(0, 500)
+      textContent = text
       
-      // Extrahuj hlavičky pre debug
-      const lines = text.split(/\r?\n/).filter(l => l.trim())
+      // Extrahuj prvých pár riadkov pre debug
+      const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 5)
+      debugLines.push(`Počet riadkov: ${text.split(/\r?\n/).filter(l => l.trim()).length}`)
+      debugLines.push(`Prvý riadok: ${lines[0]?.substring(0, 80) || 'prázdny'}...`)
+      
+      // Nájdi riadok s hlavičkami
       for (let i = 0; i < Math.min(30, lines.length); i++) {
-        const parts = lines[i].split(/[;,]/)
-        if (parts.length >= 3) {
-          headersFound = parts.map(p => p.replace(/"/g, '').trim()).slice(0, 10)
+        const line = text.split(/\r?\n/)[i] || ''
+        if (line.toLowerCase().includes('dátum') || line.toLowerCase().includes('datum')) {
+          debugLines.push(`Hlavičky na riadku ${i}: ${line.substring(0, 100)}...`)
           break
         }
       }
-      
-      console.log('=== IMPORT DEBUG ===')
-      console.log('Filename:', filename)
-      console.log('File size:', fileSize)
-      console.log('Headers found:', headersFound)
-      console.log('Content preview:', textPreview.substring(0, 200))
     } catch (e) {
-      console.error('Error decoding content:', e)
+      debugLines.push(`Chyba dekódovania: ${e}`)
     }
     
     // Parsuj súbor
-    console.log('Calling parserManager.parseFile...')
+    debugLines.push('Spúšťam parser...')
     const parseResult: ImportResult = await parserManager.parseFile(content, filename, forceBankName)
     detectedBank = parseResult.bankName
     
-    console.log('Parse result:', {
-      success: parseResult.success,
-      bankName: parseResult.bankName,
-      transactionCount: parseResult.transactions.length,
-      errors: parseResult.errors,
-      accountNumber: parseResult.accountNumber
-    })
+    debugLines.push(`Detekovaná banka: ${parseResult.bankName}`)
+    debugLines.push(`Nájdených transakcií: ${parseResult.transactions.length}`)
+    if (parseResult.errors.length > 0) {
+      debugLines.push(`Parser chyby: ${parseResult.errors.join(', ')}`)
+    }
+    
+    console.log('=== IMPORT DEBUG ===')
+    console.log(debugLines.join('\n'))
     
     if (!parseResult.success || parseResult.transactions.length === 0) {
       return {
@@ -103,13 +99,7 @@ export async function processImportFile(
         errors: parseResult.errors.length > 0 
           ? parseResult.errors 
           : ['V súbore neboli nájdené žiadne transakcie'],
-        debug: {
-          fileSize,
-          filename,
-          detectedBank: parseResult.bankName,
-          contentPreview: textPreview,
-          headersFound
-        }
+        debugInfo: debugLines.join(' | ')
       }
     }
     
@@ -135,12 +125,14 @@ export async function processImportFile(
       accountNumber: account.accountNumber,
       imported: importResult.imported,
       duplicates: importResult.duplicates,
-      errors: [...parseResult.errors, ...importResult.errors]
+      errors: [...parseResult.errors, ...importResult.errors],
+      debugInfo: debugLines.join(' | ')
     }
     
   } catch (error) {
-    // Zachyť všetky chyby a vráť debug info
+    // Zachyť všetky chyby
     const errorMessage = error instanceof Error ? error.message : 'Neznáma chyba'
+    debugLines.push(`EXCEPTION: ${errorMessage}`)
     console.error('Import error:', error)
     
     return {
@@ -149,14 +141,7 @@ export async function processImportFile(
       imported: 0,
       duplicates: 0,
       errors: [`Chyba pri spracovaní: ${errorMessage}`],
-      debug: {
-        fileSize,
-        filename,
-        detectedBank,
-        contentPreview: textPreview,
-        headersFound,
-        error: errorMessage
-      }
+      debugInfo: debugLines.join(' | ')
     }
   }
 }
