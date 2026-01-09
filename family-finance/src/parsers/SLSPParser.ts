@@ -4,12 +4,31 @@ import * as XLSX from 'xlsx';
 
 /**
  * Parser pre SLSP (Slovenská sporiteľňa) - George exporty
- * Podporuje SEPA XML (camt.053) a Excel (XLSX) formáty
+ * Podporuje:
+ * - CSV export (bodkočiarka delimiter)
+ * - SEPA XML (camt.053)
+ * - Excel (XLSX)
  */
 export class SLSPParser extends BaseParser {
   name: BankName = 'SLSP';
   
-  // Známe hlavičky SLSP Excel exportov
+  // Známe hlavičky SLSP CSV exportov (nový formát)
+  private readonly slspCsvHeaders = [
+    'vlastný názov účtu',
+    'vlastny nazov uctu',
+    'vlastný iban',
+    'vlastny iban',
+    'dátum splatnosti',
+    'datum splatnosti',
+    'partner',
+    'iban partnera',
+    'typ transakcie',
+    'konštantný symbol',
+    'špecifický symbol',
+    'variabilný symbol',
+  ];
+  
+  // Známe hlavičky SLSP Excel exportov (starý formát)
   private readonly slspExcelHeaders = [
     'dátum',
     'suma',
@@ -30,19 +49,27 @@ export class SLSPParser extends BaseParser {
       return true;
     }
     
-    // Kontrola Excel hlavičiek
-    const headerLower = headers.map(h => h.toLowerCase().trim());
-    const matchCount = this.slspExcelHeaders.filter(h => 
+    const headerLower = headers.map(h => h.toLowerCase().replace(/"/g, '').trim());
+    
+    // Kontrola CSV hlavičiek (nový formát)
+    const csvMatchCount = this.slspCsvHeaders.filter(h => 
       headerLower.some(header => header.includes(h))
     ).length;
+    if (csvMatchCount >= 4) return true;
     
-    // Ak sa zhoduje aspoň 5 hlavičiek, je to pravdepodobne SLSP
-    if (matchCount >= 5) return true;
+    // Kontrola Excel hlavičiek (starý formát)
+    const excelMatchCount = this.slspExcelHeaders.filter(h => 
+      headerLower.some(header => header.includes(h))
+    ).length;
+    if (excelMatchCount >= 5) return true;
     
-    // Kontrola na "George" alebo "Slovenská sporiteľňa" v obsahu
-    if (content.toLowerCase().includes('george') || 
-        content.toLowerCase().includes('slovenská sporiteľňa') ||
-        content.toLowerCase().includes('slovenska sporitelna')) {
+    // Kontrola na "George", "SLSP" alebo "Slovenská sporiteľňa" v obsahu
+    const contentLower = content.toLowerCase();
+    if (contentLower.includes('george') || 
+        contentLower.includes('slovenská sporiteľňa') ||
+        contentLower.includes('slovenska sporitelna') ||
+        contentLower.includes('slsp') ||
+        contentLower.includes('space účet')) {
       return true;
     }
     
@@ -50,24 +77,155 @@ export class SLSPParser extends BaseParser {
   }
   
   async parse(content: string | ArrayBuffer, filename: string): Promise<ParsedTransaction[]> {
-    // Detekcia typu súboru
-    if (filename.endsWith('.xml') || (typeof content === 'string' && content.includes('<?xml'))) {
-      return this.parseSepaXml(content, filename);
+    // Konvertuj na text
+    let text: string;
+    if (content instanceof ArrayBuffer) {
+      // Skús UTF-8, potom Windows-1250
+      try {
+        text = new TextDecoder('utf-8').decode(content);
+        if (text.includes('\uFFFD')) {
+          text = new TextDecoder('windows-1250').decode(content);
+        }
+      } catch {
+        text = new TextDecoder('windows-1250').decode(content);
+      }
+    } else {
+      text = content;
     }
     
-    // Excel alebo CSV
+    // Detekcia typu súboru
+    if (filename.endsWith('.xml') || text.includes('<?xml')) {
+      return this.parseSepaXml(text, filename);
+    }
+    
+    if (filename.endsWith('.xlsx') || filename.endsWith('.xls')) {
+      return this.parseExcel(content, filename);
+    }
+    
+    // CSV formát
+    if (filename.endsWith('.csv') || text.includes(';')) {
+      return this.parseCsv(text, filename);
+    }
+    
+    // Fallback na Excel parser
     return this.parseExcel(content, filename);
+  }
+  
+  /**
+   * Parsuje CSV formát SLSP
+   * Formát hlavičky:
+   * "Vlastný názov účtu";"Vlastný IBAN";"Dátum splatnosti";"Suma";"Mena";"Partner";...
+   */
+  private parseCsv(text: string, filename: string): ParsedTransaction[] {
+    const transactions: ParsedTransaction[] = [];
+    const lines = this.parseCSV(text, ';');
+    
+    if (lines.length < 2) return transactions;
+    
+    // Prvý riadok sú hlavičky
+    const headers = lines[0].map(h => h.toLowerCase().replace(/"/g, '').trim());
+    console.log('SLSP CSV headers:', headers);
+    
+    // Mapovanie stĺpcov
+    const accountNameIdx = headers.findIndex(h => h.includes('vlastný názov') || h.includes('vlastny nazov'));
+    const ownIbanIdx = headers.findIndex(h => h.includes('vlastný iban') || h.includes('vlastny iban'));
+    const dateIdx = headers.findIndex(h => h.includes('dátum') || h.includes('datum'));
+    const amountIdx = headers.findIndex(h => h === 'suma' || h.includes('"suma"'));
+    const currencyIdx = headers.findIndex(h => h === 'mena' || h.includes('"mena"'));
+    const partnerIdx = headers.findIndex(h => h === 'partner' || h.includes('"partner"'));
+    const partnerIbanIdx = headers.findIndex(h => h.includes('iban partnera'));
+    const descIdx = headers.findIndex(h => h.includes('popis transakcie'));
+    const typeIdx = headers.findIndex(h => h.includes('typ transakcie'));
+    const ksIdx = headers.findIndex(h => h.includes('konštantný') || h.includes('konstantny'));
+    const ssIdx = headers.findIndex(h => h.includes('špecifický') || h.includes('specificky'));
+    const vsIdx = headers.findIndex(h => h.includes('variabilný') || h.includes('variabilny'));
+    
+    console.log('SLSP column indices:', { dateIdx, amountIdx, currencyIdx, partnerIdx, partnerIbanIdx });
+    
+    // Spracuj transakcie (od riadku 1, pretože 0 sú hlavičky)
+    for (let i = 1; i < lines.length; i++) {
+      const row = lines[i];
+      
+      // Preskočiť prázdne riadky
+      if (row.length < 4) continue;
+      
+      // Dátum - formát DD.MM.YYYY
+      const dateStr = row[dateIdx]?.replace(/"/g, '').trim() || '';
+      const date = this.parseDate(dateStr);
+      
+      if (!date) continue;
+      
+      // Suma - formát "-480,00" alebo "-2 500,00"
+      const amountStr = row[amountIdx]?.replace(/"/g, '').trim() || '0';
+      const amount = this.parseSLSPAmount(amountStr);
+      
+      // Mena
+      const currency = (row[currencyIdx]?.replace(/"/g, '').trim() || 'EUR').toUpperCase();
+      
+      // Partner a IBAN
+      const partner = row[partnerIdx]?.replace(/"/g, '').trim() || '';
+      const partnerIban = row[partnerIbanIdx]?.replace(/"/g, '').trim() || '';
+      
+      // Popis a typ transakcie
+      const description = row[descIdx]?.replace(/"/g, '').trim() || '';
+      const transactionType = row[typeIdx]?.replace(/"/g, '').trim() || '';
+      
+      // Symboly
+      const ks = ksIdx >= 0 ? row[ksIdx]?.replace(/"/g, '').trim() : undefined;
+      const ss = ssIdx >= 0 ? row[ssIdx]?.replace(/"/g, '').trim() : undefined;
+      const vs = vsIdx >= 0 ? row[vsIdx]?.replace(/"/g, '').trim() : undefined;
+      
+      // Vlastný účet
+      const ownIban = row[ownIbanIdx]?.replace(/"/g, '').trim() || '';
+      
+      const transaction: ParsedTransaction = {
+        date,
+        amount,
+        currency,
+        counterparty: partner || undefined,
+        counterpartyAccount: partnerIban || undefined,
+        description: [transactionType, description].filter(Boolean).join(' - ') || undefined,
+        variableSymbol: vs || undefined,
+        constantSymbol: ks || undefined,
+        specificSymbol: ss || undefined,
+        rawData: {
+          source: 'SLSP',
+          format: 'CSV',
+          filename,
+          ownIban,
+          transactionType,
+          row: Object.fromEntries(headers.map((h, idx) => [h, row[idx]?.replace(/"/g, '')])),
+        },
+      };
+      
+      transactions.push(this.applyCategorization(transaction));
+    }
+    
+    return transactions;
+  }
+  
+  /**
+   * Parsuje sumu z SLSP formátu (napr. "-480,00" alebo "-2 500,00")
+   */
+  private parseSLSPAmount(amountStr: string): number {
+    if (!amountStr) return 0;
+    
+    // Odstráň medzery (tisícový oddeľovač) a nahraď čiarku bodkou
+    const normalized = amountStr
+      .replace(/\s/g, '')  // Odstráň medzery
+      .replace(',', '.');   // Nahraď desatinnú čiarku
+    
+    const amount = parseFloat(normalized);
+    return isNaN(amount) ? 0 : amount;
   }
   
   /**
    * Parsuje SEPA XML (camt.053) formát
    */
-  private async parseSepaXml(content: string | ArrayBuffer, filename: string): Promise<ParsedTransaction[]> {
-    const text = typeof content === 'string' ? content : new TextDecoder('utf-8').decode(content);
+  private parseSepaXml(text: string, filename: string): ParsedTransaction[] {
     const transactions: ParsedTransaction[] = [];
     
     // Jednoduchý XML parser pre camt.053
-    // V produkčnom prostredí by sa použila knižnica ako fast-xml-parser
     const entryRegex = /<Ntry>([\s\S]*?)<\/Ntry>/g;
     let match;
     
@@ -127,7 +285,7 @@ export class SLSPParser extends BaseParser {
   /**
    * Parsuje Excel (XLSX) formát
    */
-  private async parseExcel(content: string | ArrayBuffer, filename: string): Promise<ParsedTransaction[]> {
+  private parseExcel(content: string | ArrayBuffer, filename: string): ParsedTransaction[] {
     const transactions: ParsedTransaction[] = [];
     
     try {
@@ -156,11 +314,11 @@ export class SLSPParser extends BaseParser {
       const headers = (data[headerRowIndex] as string[]).map(h => String(h || '').toLowerCase().trim());
       
       // Mapovanie stĺpcov
-      const dateIdx = headers.findIndex(h => h.includes('dátum') && (h.includes('účtov') || h.includes('transakc')));
+      const dateIdx = headers.findIndex(h => h.includes('dátum') && (h.includes('účtov') || h.includes('transakc') || h.includes('splatnosti')));
       const amountIdx = headers.findIndex(h => h.includes('suma') || h.includes('čiastka'));
       const currencyIdx = headers.findIndex(h => h.includes('mena'));
-      const counterpartyIdx = headers.findIndex(h => h.includes('názov protistrany') || h.includes('protiúčet'));
-      const counterpartyAccountIdx = headers.findIndex(h => h.includes('iban') || h.includes('účet protistrany'));
+      const counterpartyIdx = headers.findIndex(h => h.includes('názov protistrany') || h.includes('partner') || h.includes('protiúčet'));
+      const counterpartyAccountIdx = headers.findIndex(h => h.includes('iban') && h.includes('partner'));
       const descIdx = headers.findIndex(h => h.includes('poznámka') || h.includes('popis'));
       const vsIdx = headers.findIndex(h => h.includes('variabilný'));
       const ksIdx = headers.findIndex(h => h.includes('konštantný'));
@@ -187,7 +345,12 @@ export class SLSPParser extends BaseParser {
         
         if (!date) continue;
         
-        const amount = this.parseAmount(String(row[amountIdx] || '0'));
+        // Spracuj sumu - môže byť vo formáte s medzerou
+        const amountValue = row[amountIdx];
+        const amount = typeof amountValue === 'number' 
+          ? amountValue 
+          : this.parseSLSPAmount(String(amountValue || '0'));
+        
         const currency = String(row[currencyIdx] || 'EUR').toUpperCase();
         
         const transaction: ParsedTransaction = {
@@ -195,7 +358,7 @@ export class SLSPParser extends BaseParser {
           amount,
           currency,
           counterparty: String(row[counterpartyIdx] || '') || undefined,
-          counterpartyAccount: String(row[counterpartyAccountIdx] || '') || undefined,
+          counterpartyAccount: counterpartyAccountIdx >= 0 ? String(row[counterpartyAccountIdx] || '') || undefined : undefined,
           description: String(row[descIdx] || '') || undefined,
           variableSymbol: vsIdx >= 0 ? String(row[vsIdx] || '') || undefined : undefined,
           constantSymbol: ksIdx >= 0 ? String(row[ksIdx] || '') || undefined : undefined,
@@ -244,9 +407,24 @@ export class SLSPParser extends BaseParser {
   }
   
   detectAccountNumber(content: string | ArrayBuffer): string | null {
-    const text = typeof content === 'string' ? content : new TextDecoder('utf-8').decode(content);
+    let text: string;
+    if (content instanceof ArrayBuffer) {
+      try {
+        text = new TextDecoder('utf-8').decode(content);
+      } catch {
+        text = new TextDecoder('windows-1250').decode(content);
+      }
+    } else {
+      text = content;
+    }
     
-    // IBAN pattern
+    // IBAN pattern - hľadaj "Vlastný IBAN" alebo prvý SK IBAN
+    const ownIbanMatch = text.match(/"Vlastný IBAN"[;\s]*"?(SK\d{22})"?/i);
+    if (ownIbanMatch) {
+      return ownIbanMatch[1];
+    }
+    
+    // Generický IBAN pattern
     const ibanMatch = text.match(/SK\d{22}/);
     if (ibanMatch) {
       return ibanMatch[0];
