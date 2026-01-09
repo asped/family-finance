@@ -130,16 +130,35 @@ export class ParserManager {
         return ['xml'];
       }
       
-      // CSV súbory - extrahuj prvý riadok
+      // CSV súbory - hľadaj riadok s hlavičkami
       const lines = text.split(/\r?\n/).filter(line => line.trim());
-      if (lines.length > 0) {
-        // Detekuj delimiter
-        const firstLine = lines[0];
-        const semicolonCount = (firstLine.match(/;/g) || []).length;
-        const commaCount = (firstLine.match(/,/g) || []).length;
-        const delimiter = semicolonCount > commaCount ? ';' : ',';
+      
+      // Detekuj delimiter z celého súboru
+      const fullText = lines.slice(0, 30).join('\n');
+      const semicolonCount = (fullText.match(/;/g) || []).length;
+      const commaCount = (fullText.match(/,/g) || []).length;
+      const delimiter = semicolonCount > commaCount ? ';' : ',';
+      
+      // Hľadaj riadok s hlavičkami (môže byť na riadku 10+ pre mBank)
+      for (let i = 0; i < Math.min(30, lines.length); i++) {
+        const line = lines[i];
+        const parts = line.split(delimiter).map(h => h.replace(/"/g, '').trim());
         
-        return firstLine.split(delimiter).map(h => h.replace(/"/g, '').trim());
+        // Hľadaj riadok s "#Dátum" alebo "Dátum" alebo aspoň 4 neprázdne časti
+        const hasDateHeader = parts.some(p => 
+          p.toLowerCase().includes('dátum') || 
+          p.toLowerCase().includes('datum') ||
+          p.toLowerCase().includes('date')
+        );
+        
+        if (hasDateHeader && parts.filter(Boolean).length >= 3) {
+          return parts;
+        }
+      }
+      
+      // Fallback - prvý riadok
+      if (lines.length > 0) {
+        return lines[0].split(delimiter).map(h => h.replace(/"/g, '').trim());
       }
       
       return [];
@@ -150,12 +169,31 @@ export class ParserManager {
   
   /**
    * Konvertuje ArrayBuffer na string
+   * Skúša najprv UTF-8, potom Windows-1250 (Central European)
    */
   private getTextContent(content: string | ArrayBuffer): string {
     if (typeof content === 'string') {
       return content;
     }
-    return new TextDecoder('utf-8').decode(content);
+    
+    // Skús najprv UTF-8
+    try {
+      const utf8Text = new TextDecoder('utf-8').decode(content);
+      // Ak obsahuje platné UTF-8 znaky (nie replacement chars), vráť
+      if (!utf8Text.includes('\uFFFD')) {
+        return utf8Text;
+      }
+    } catch {
+      // Pokračuj na Windows-1250
+    }
+    
+    // Skús Windows-1250 (mBank, niektoré slovenské banky)
+    try {
+      return new TextDecoder('windows-1250').decode(content);
+    } catch {
+      // Fallback na UTF-8 s chybami
+      return new TextDecoder('utf-8', { fatal: false }).decode(content);
+    }
   }
   
   /**
