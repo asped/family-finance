@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { getTransactions, getCategories, updateTransactionCategory, deleteTransaction } from "@/actions/transactions"
+import { getTransactions, getCategories, updateTransactionCategory, deleteTransaction, SortField, SortOrder } from "@/actions/transactions"
 import { getAccounts } from "@/actions/accounts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatDate, CATEGORIES } from "@/lib/utils"
-import { Search, Filter, Trash2, ArrowUpDown, X } from "lucide-react"
+import { Search, Filter, Trash2, ArrowUpDown, ArrowUp, ArrowDown, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import type { TransactionFilters } from "@/types"
 
 interface Transaction {
@@ -38,12 +38,24 @@ interface Account {
   ownerName: string
 }
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
+
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [showFilters, setShowFilters] = useState(false)
+  
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  
+  // Sorting state
+  const [sortField, setSortField] = useState<SortField>('date')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   
   // Filter state
   const [filters, setFilters] = useState<TransactionFilters>({
@@ -73,13 +85,15 @@ export default function TransactionsPage() {
         amountMax: amountMax ? parseFloat(amountMax) : undefined,
       }
       
-      const [txs, accs, cats] = await Promise.all([
-        getTransactions(appliedFilters),
+      const [result, accs, cats] = await Promise.all([
+        getTransactions(appliedFilters, page, pageSize, sortField, sortOrder),
         getAccounts(),
         getCategories()
       ])
       
-      setTransactions(txs as Transaction[])
+      setTransactions(result.transactions as Transaction[])
+      setTotal(result.total)
+      setTotalPages(result.totalPages)
       setAccounts(accs as Account[])
       setCategories(cats)
     } catch (error) {
@@ -87,11 +101,35 @@ export default function TransactionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [filters, searchText, selectedAccount, selectedBank, selectedCategory, dateFrom, dateTo, amountMin, amountMax])
+  }, [filters, searchText, selectedAccount, selectedBank, selectedCategory, dateFrom, dateTo, amountMin, amountMax, page, pageSize, sortField, sortOrder])
   
   useEffect(() => {
     loadData()
   }, [loadData])
+  
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1)
+  }, [searchText, selectedAccount, selectedBank, selectedCategory, dateFrom, dateTo, amountMin, amountMax, filters])
+  
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortOrder('desc')
+    }
+    setPage(1)
+  }
+  
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />
+    }
+    return sortOrder === 'asc' 
+      ? <ArrowUp className="h-4 w-4 ml-1" />
+      : <ArrowDown className="h-4 w-4 ml-1" />
+  }
   
   const handleCategoryChange = async (transactionId: string, category: string) => {
     await updateTransactionCategory(transactionId, category)
@@ -115,6 +153,7 @@ export default function TransactionsPage() {
     setAmountMin("")
     setAmountMax("")
     setFilters({ showInternalTransfers: true })
+    setPage(1)
   }
   
   const uniqueBanks = Array.from(new Set(accounts.map(a => a.bankName)))
@@ -278,10 +317,27 @@ export default function TransactionsPage() {
       {/* Transactions Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Transakcie ({transactions.length})</CardTitle>
-          <CardDescription>
-            Kliknutím na kategóriu ju môžete zmeniť
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Transakcie ({total.toLocaleString()})</CardTitle>
+              <CardDescription>
+                Strana {page} z {totalPages} • Kliknutím na hlavičku zoraďte
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-sm text-muted-foreground">Na stránku:</Label>
+              <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(parseInt(v)); setPage(1); }}>
+                <SelectTrigger className="w-[80px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={size.toString()}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -294,79 +350,180 @@ export default function TransactionsPage() {
               <p className="text-sm">Importujte súbor alebo prepojte banku</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[100px]">Dátum</TableHead>
-                    <TableHead>Banka</TableHead>
-                    <TableHead>Protistrana</TableHead>
-                    <TableHead>Popis</TableHead>
-                    <TableHead>Kategória</TableHead>
-                    <TableHead className="text-right">Suma</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map((tx) => (
-                    <TableRow 
-                      key={tx.id}
-                      className={tx.isInternalTransfer ? 'bg-blue-50/50' : ''}
-                    >
-                      <TableCell className="font-mono text-sm">
-                        {formatDate(tx.date)}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{tx.account.bankName}</span>
-                      </TableCell>
-                      <TableCell className="max-w-[200px] truncate">
-                        {tx.counterparty || '-'}
-                      </TableCell>
-                      <TableCell className="max-w-[300px] truncate text-muted-foreground">
-                        {tx.description || '-'}
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={tx.category || ''}
-                          onValueChange={(val) => handleCategoryChange(tx.id, val)}
-                        >
-                          <SelectTrigger className="w-[140px] h-8">
-                            <SelectValue placeholder="Kategória" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CATEGORIES.map((cat) => (
-                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {tx.isInternalTransfer && (
-                            <Badge variant="transfer" className="text-xs">
-                              Prevod
-                            </Badge>
-                          )}
-                          <span className={`font-mono font-medium ${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount, tx.currency)}
-                          </span>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead 
+                        className="w-[100px] cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleSort('date')}
+                      >
+                        <div className="flex items-center">
+                          Dátum
+                          <SortIcon field="date" />
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(tx.id)}
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+                      </TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleSort('bankName')}
+                      >
+                        <div className="flex items-center">
+                          Banka
+                          <SortIcon field="bankName" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleSort('counterparty')}
+                      >
+                        <div className="flex items-center">
+                          Protistrana
+                          <SortIcon field="counterparty" />
+                        </div>
+                      </TableHead>
+                      <TableHead>Popis</TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleSort('category')}
+                      >
+                        <div className="flex items-center">
+                          Kategória
+                          <SortIcon field="category" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleSort('amount')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Suma
+                          <SortIcon field="amount" />
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {transactions.map((tx) => (
+                      <TableRow 
+                        key={tx.id}
+                        className={tx.isInternalTransfer ? 'bg-blue-50/50' : ''}
+                      >
+                        <TableCell className="font-mono text-sm">
+                          {formatDate(tx.date)}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm">{tx.account.bankName}</span>
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {tx.counterparty || '-'}
+                        </TableCell>
+                        <TableCell className="max-w-[300px] truncate text-muted-foreground">
+                          {tx.description || '-'}
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={tx.category || ''}
+                            onValueChange={(val) => handleCategoryChange(tx.id, val)}
+                          >
+                            <SelectTrigger className="w-[140px] h-8">
+                              <SelectValue placeholder="Kategória" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORIES.map((cat) => (
+                                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {tx.isInternalTransfer && (
+                              <Badge variant="transfer" className="text-xs">
+                                Prevod
+                              </Badge>
+                            )}
+                            <span className={`font-mono font-medium ${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount, tx.currency)}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(tx.id)}
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              {/* Pagination */}
+              <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                <div className="text-sm text-muted-foreground">
+                  Zobrazené {((page - 1) * pageSize) + 1} - {Math.min(page * pageSize, total)} z {total.toLocaleString()}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  
+                  <div className="flex items-center gap-1 mx-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={totalPages}
+                      value={page}
+                      onChange={(e) => {
+                        const p = parseInt(e.target.value)
+                        if (p >= 1 && p <= totalPages) {
+                          setPage(p)
+                        }
+                      }}
+                      className="w-16 text-center"
+                    />
+                    <span className="text-sm text-muted-foreground">/ {totalPages}</span>
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages}
+                  >
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

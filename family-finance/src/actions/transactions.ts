@@ -21,7 +21,25 @@ export interface CreateTransactionInput {
   importSource?: string
 }
 
-export async function getTransactions(filters?: TransactionFilters) {
+export type SortField = 'date' | 'amount' | 'bankName' | 'counterparty' | 'category'
+export type SortOrder = 'asc' | 'desc'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface PaginatedTransactions {
+  transactions: any[] // Complex type with include relations
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+export async function getTransactions(
+  filters?: TransactionFilters,
+  page: number = 1,
+  pageSize: number = 50,
+  sortField: SortField = 'date',
+  sortOrder: SortOrder = 'desc'
+): Promise<PaginatedTransactions> {
   const where: Record<string, unknown> = {}
   
   if (filters?.accountId) {
@@ -67,6 +85,18 @@ export async function getTransactions(filters?: TransactionFilters) {
     where.isInternalTransfer = false
   }
   
+  // Build orderBy based on sortField
+  let orderBy: Record<string, unknown> = {}
+  if (sortField === 'bankName') {
+    orderBy = { account: { bankName: sortOrder } }
+  } else {
+    orderBy = { [sortField]: sortOrder }
+  }
+  
+  // Get total count
+  const total = await prisma.transaction.count({ where })
+  
+  // Get paginated transactions
   const transactions = await prisma.transaction.findMany({
     where,
     include: {
@@ -79,10 +109,18 @@ export async function getTransactions(filters?: TransactionFilters) {
         }
       }
     },
-    orderBy: { date: 'desc' }
+    orderBy,
+    skip: (page - 1) * pageSize,
+    take: pageSize,
   })
   
-  return transactions
+  return {
+    transactions,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  }
 }
 
 export async function createTransaction(input: CreateTransactionInput) {
@@ -276,7 +314,8 @@ export async function detectInternalTransfers() {
  * Vypočíta finančný súhrn
  */
 export async function getFinancialSummary(filters?: TransactionFilters): Promise<FinancialSummary> {
-  const transactions = await getTransactions(filters)
+  const result = await getTransactions(filters, 1, 10000) // Get all for summary
+  const transactions = result.transactions
   
   let totalIncome = 0
   let totalExpense = 0
